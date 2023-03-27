@@ -579,14 +579,16 @@ void loop()
       //Read and collect data from the IMU
       case read_IMU:
       {
-      enableMuxPort(IMU_CHANNEL);
       
+        enableMuxPort(IMU_CHANNEL);
         myICM.getAGMT(); //updates the values
-        printScaledAGMT(&myICM);
+        //printRawAGMT( myICM.agmt );
+        convertRaw(myICM.agmt);
         waveHeight = myICM.accX();
         wavePeriod = myICM.magX();
         waveDirection = myICM.gyrX();
         delay(30);
+        disableMuxPort(IMU_CHANNEL);
       
       loop_step = start_LTC3225; // Move on, start the super capacitor charger
 
@@ -966,12 +968,12 @@ void loop()
         // Close and detach the serial console
         Serial.println(F("Going into deep sleep until next INTERVAL..."));
        
-  
+        
         Serial.flush(); //Finish any prints
          
         
         Serial.end(); // Close the serial console
-        
+        Serial.print("does this work?");
         // Code taken (mostly) from Apollo3 Example6_Low_Power_Alarm
         
         // Disable ADC
@@ -982,19 +984,20 @@ void loop()
         //am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM1); // agtWire I2C
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM2);
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM3);
-        am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM4); // Qwiic I2C
+        //am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM4); // Qwiic I2C
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM5);
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_ADC);
         //am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_UART0); // Leave UART0 on to avoid printing erroneous characters to Serial
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_UART1); // Serial1
       
         // Disable all unused pins - including: SCL (8), SDA (9), UART0 TX (48) and RX (49) and UART1 TX (24) and RX (25)
+    
         const int pinsToDisable[] = {0,1,2,8,9,11,12,14,15,16,20,21,24,25,29,31,32,33,36,37,38,42,43,44,45,48,49,-1};
         for (int x = 0; pinsToDisable[x] >= 0; x++)
         {
           pin_config(PinName(pinsToDisable[x]), g_AM_HAL_GPIO_DISABLE);
         }
-      
+        Serial.println("Post disable pins");
         //Power down CACHE, flashand SRAM
         am_hal_pwrctrl_memory_deepsleep_powerdown(AM_HAL_PWRCTRL_MEM_ALL); // Power down all flash and cache
         am_hal_pwrctrl_memory_deepsleep_retain(AM_HAL_PWRCTRL_MEM_SRAM_384K); // Retain all SRAM (0.6 uA)
@@ -1010,7 +1013,7 @@ void loop()
           am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_DEEP);
         }
         intervalAlarm = false; // Clear the alarm flag now
-
+        Serial.print("through interval alarm");
         // Wake up!
         loop_step = wakeUp;
       }
@@ -1376,7 +1379,7 @@ static int ftoa(float fValue, char *pcBuf, int iPrecision, int bufSize)
     *pcBuf = 0x00;
 
     return (pcBuf - pcBufInitial);
-} // ftoa()
+} // ftoa() 
 
 //MUX methods 
 //Enables a specific port number
@@ -1428,7 +1431,7 @@ float average(float temp[]){
       }
 
 // Below here are some helper functions to print the data nicely!
-
+/*
 void printPaddedInt16b(int16_t val)
 {
   if (val > 0)
@@ -1473,7 +1476,7 @@ void printPaddedInt16b(int16_t val)
   }
   SERIAL_PORT.print(abs(val));
 }
-#ifdef USE_SPI
+/*#ifdef USE_SPI
 void printScaledAGMT(ICM_20948_SPI *sensor)
 {
 #else
@@ -1503,8 +1506,32 @@ void printScaledAGMT(ICM_20948_I2C *sensor)
   SERIAL_PORT.print(" ]");
   SERIAL_PORT.println();
 }
-
-void printFormattedFloat(float val, uint8_t leading, uint8_t decimals)
+void printRawAGMT(ICM_20948_AGMT_t agmt)
+{
+  SERIAL_PORT.print("RAW. Acc [ ");
+  printPaddedInt16b(agmt.acc.axes.x);
+  SERIAL_PORT.print(", ");
+  printPaddedInt16b(agmt.acc.axes.y);
+  SERIAL_PORT.print(", ");
+  printPaddedInt16b(agmt.acc.axes.z);
+  SERIAL_PORT.print(" ], Gyr [ ");
+  printPaddedInt16b(agmt.gyr.axes.x);
+  SERIAL_PORT.print(", ");
+  printPaddedInt16b(agmt.gyr.axes.y);
+  SERIAL_PORT.print(", ");
+  printPaddedInt16b(agmt.gyr.axes.z);
+  SERIAL_PORT.print(" ], Mag [ ");
+  printPaddedInt16b(agmt.mag.axes.x);
+  SERIAL_PORT.print(", ");
+  printPaddedInt16b(agmt.mag.axes.y);
+  SERIAL_PORT.print(", ");
+  printPaddedInt16b(agmt.mag.axes.z);
+  SERIAL_PORT.print(" ], Tmp [ ");
+  printPaddedInt16b(agmt.tmp.val);
+  SERIAL_PORT.print(" ]");
+  SERIAL_PORT.println();
+}*/
+/*void printFormattedFloat(float val, uint8_t leading, uint8_t decimals)
 {
   float aval = abs(val);
   if (val < 0)
@@ -1543,5 +1570,29 @@ void printFormattedFloat(float val, uint8_t leading, uint8_t decimals)
   {
     SERIAL_PORT.print(val, decimals);
   }
+}*/
+
+
+void convertRaw(ICM_20948_AGMT_t agmt){
+  //constants
+  int s2g = 16384;
+  int s4g = 8192;
+  int s16g = 2048;
+  float gScale = 131.072;
+  float mScale = 0.15;
+  float g = 0.00981;  //milli g to m/s ^2 
+
+  //acc
+  agmt.acc.axes.x /= s2g;
+  agmt.acc.axes.y /= s2g;
+  agmt.acc.axes.z /= s2g;
+  agmt.gyr.axes.x /= gScale;
+  agmt.gyr.axes.y /= gScale;
+  agmt.gyr.axes.z /= gScale;
+  agmt.mag.axes.x *= mScale;
+  agmt.mag.axes.y *= mScale;
+  agmt.mag.axes.z *= mScale;
+  
+  
 }
 
