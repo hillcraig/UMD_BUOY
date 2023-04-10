@@ -91,6 +91,7 @@ byte  agtHour = 0; // GNSS hours
 byte  agtMinute = 0; // GNSS minutes
 byte  agtSecond = 0; // GNSS seconds
 int   agtMilliseconds = 0; // GNSS milliseconds
+int signalQuality = -1; 
 //float agtPascals = 0.0; // Atmospheric pressure in Pascals
 //float agtTempC = 0.0; // Temperature in Celcius
 float airTemp = 0.0;
@@ -788,6 +789,12 @@ void loop()
       Serial.println(F("Starting modem..."));
       agtErr = modem.begin();
 
+      //check signal
+      signalQuality = modem.getSignalQuality(signalQuality);
+      Serial.print(F("On a scale of 0 to 5, signal quality is currently "));
+      Serial.print(signalQuality);
+      Serial.println(F("."));
+      
       // Check if the modem started correctly
       if (agtErr != ISBD_SUCCESS)
       {
@@ -1436,7 +1443,8 @@ void printPaddedInt16b(int16_t val)
 {
   if (val > 0)
   {
-    SERIAL_PORT.print(" ");
+    SERIAL_PORT.prin/t(" ");
+    SERIAL_PORT.prin/t(" ");
     if (val < 10000)
     {
       SERIAL_PORT.print("0");
