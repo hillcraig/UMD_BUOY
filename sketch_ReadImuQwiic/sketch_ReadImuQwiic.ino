@@ -31,7 +31,18 @@ void setup() {
   Serial.begin(115200);
   Wire.begin();
 
+  float accX [2048];
+  float accy [2048];
+  float accZ [2048];
 
+  float magX [2048];
+  float magY [2048];
+  float magZ [2048];
+
+  float gyrX [2048];
+  float gyrY [2048];
+  float gyrZ [2048];
+  
 
   // Initialize visible spectral sensor
   enableMuxPort(IMU_CHANNEL); 
@@ -226,8 +237,8 @@ void convertRaw(ICM_20948_AGMT_t agmt){
   agmt.mag.axes.x *= mScale;
   agmt.mag.axes.y *= mScale;
   agmt.mag.axes.z *= mScale;
-  SERIAL_PORT.print(agmt.mag.axes.z);
-  delay(1000);
+  
+  
 }
 
 
