@@ -9,7 +9,7 @@
 
 // Parameters
 const int MUX_ADDR = 0x70;
-const int IMU_CHANNEL = 0;
+const int IMU_CHANNEL = 2;
 const int NIR_CHANNEL = 1;
 
 // Pins
@@ -24,6 +24,17 @@ const int DC_JUMPER = 1;
 
 // Globals
 ICM_20948_I2C myICM;
+ float accX[2048];
+  float accY[2048];
+  float accZ[2048];
+
+  float magX[2048];
+  float magY[2048];
+  float magZ[2048];
+
+  float gyrX[2048];
+  float gyrY[2048];
+  float gyrZ[2048];
 
 void setup() {
 
@@ -31,18 +42,10 @@ void setup() {
   Serial.begin(115200);
   Wire.begin();
 
-  float accX [2048];
-  float accy [2048];
-  float accZ [2048];
+ 
 
-  float magX [2048];
-  float magY [2048];
-  float magZ [2048];
 
-  float gyrX [2048];
-  float gyrY [2048];
-  float gyrZ [2048];
-  
+
 
   // Initialize visible spectral sensor
   enableMuxPort(IMU_CHANNEL); 
@@ -55,7 +58,7 @@ void setup() {
   bool initialized = false;
   while (!initialized)
   {
-    enableMuxPort(0);
+    enableMuxPort(2);
 /*#ifdef USE_SPI
     myICM.begin(CS_PIN, SPI_PORT, SPI_FREQ); // Here we are using the user-defined SPI_FREQ as the clock speed of the SPI bus
 #else
@@ -76,14 +79,17 @@ void setup() {
       initialized = true;
       Serial.println("Device Connected!");
     }
-    disableMuxPort(0);
+    disableMuxPort(IMU_CHANNEL);
   }
+  int i = 0;
 }
 
 
 
 void loop() {
-  enableMuxPort(0);
+  int i = 0;
+  while(i<2048){
+  enableMuxPort(IMU_CHANNEL);
   if (myICM.dataReady())
   {
     myICM.getAGMT();         // The values are only updated when you call 'getAGMT'
@@ -100,7 +106,15 @@ void loop() {
 
 
 
-  disableMuxPort(0);
+  disableMuxPort(IMU_CHANNEL);
+    fillMatrix(i, myICM.agmt);
+    i++;
+    Serial.println(i);
+  
+  }//end while
+  printMatrix();
+
+  break;
 
 }
 
@@ -313,5 +327,48 @@ void printScaledAGMT(ICM_20948_I2C *sensor)
   SERIAL_PORT.print(" ]");
   SERIAL_PORT.println();
 }
+
+  void fillMatrix(int i, ICM_20948_AGMT_t agmt){
+  
+    accX[i] = (agmt.acc.axes.x);
+    accY[i] = (agmt.acc.axes.y);
+    accZ[i] = (agmt.acc.axes.z);
+
+    gyrX[i] = (agmt.gyr.axes.x);
+    gyrY[i] = (agmt.gyr.axes.y);
+    gyrZ[i] = (agmt.gyr.axes.z);
+
+    magX[i] = (agmt.mag.axes.x);
+    magY[i] = (agmt.mag.axes.y);
+    magZ[i] = (agmt.mag.axes.z);
+  
+}
+
+
+void printMatrix(){
+  for(int y = 0; y < 2048; y++){
+    Serial.print(accX[y]);
+    Serial.print(", ");
+    Serial.print(accY[y]);
+    Serial.print(", ");
+    Serial.print(accZ[y]);
+    Serial.print(", ");
+    Serial.print(gyrX[y]);
+    Serial.print(", ");
+    Serial.print(gyrY[y]);
+    Serial.print(", ");
+    Serial.print(gyrZ[y]);
+    Serial.print(", ");
+    Serial.print(magX[y]);
+    Serial.print(", ");
+    Serial.print(magY[y]);
+    Serial.print(", ");
+    Serial.print(magZ[y]);
+    Serial.println();
+    
+  }
+  return;
+}
+
 
 
