@@ -412,6 +412,7 @@ void loop()
           agtMinute = 0; // GNSS minutes
           agtSecond = 0; // GNSS seconds
           agtMilliseconds = 0; // GNSS milliseconds
+          
   
           // Power down the GNSS
           gnssOFF(); // Disable power for the GNSS
@@ -775,7 +776,8 @@ void loop()
     // ************************************************************************************************
     // Enable the 9603N and attempt to send a message
     case start_9603:
-    
+      //set signal back to zero
+      signalQuality = -1;
       // Enable power for the 9603N
       Serial.println(F("Enabling 9603N power..."));
       digitalWrite(iridiumPwrEN, HIGH); // Enable Iridium Power
