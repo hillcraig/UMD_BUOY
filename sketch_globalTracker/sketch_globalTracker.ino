@@ -36,6 +36,18 @@ IridiumSBD modem(Serial1, iridiumSleep, iridiumRI);
 ICM_20948_I2C myICM;
 TSYS01 waterSensor;
 TSYS01 airSensor;
+  
+  float accX[2048];
+  float accY[2048];
+  float accZ[2048];
+
+  float magX[2048];
+  float magY[2048];
+  float magZ[2048];
+
+  float gyrX[2048];
+  float gyrY[2048];
+  float gyrZ[2048];
 
 //Params
 const int MUX_ADDR = 0x70;
@@ -508,8 +520,8 @@ void loop()
         agtPDOP = myGNSS.getPDOP() / 100; // Get the PDOP in m
 
         Serial.println(F("A 3D fix was found!"));
-        Serial.print(F("Latitude (degrees): ")); Serial.println(agtLatitude, 6);
-        Serial.print(F("Longitude (degrees): ")); Serial.println(agtLongitude, 6);
+        Serial.print(F("Latitude (degrees): ")); Serial.println(agtLatitude, 5);
+        Serial.print(F("Longitude (degrees): ")); Serial.println(agtLongitude, 5);
         Serial.print(F("Altitude (m): ")); Serial.println(agtAltitude);
 
         loop_step = read_temp; // Move on, read the temperature
@@ -572,6 +584,10 @@ void loop()
       //average out temps
       airTemp = average(airAVG);
       waterTemp = average(waterAVG);
+      Serial.print("Air Temp average is: ");
+      Serial.println(airTemp);
+      Serial.print("Water Temp average is: ");
+      Serial.println(waterTemp);
       
        loop_step = read_IMU; // Move on, read IMU
        //loop_step = start_LTC3225; // Move on, start the super capacitor charger
@@ -581,11 +597,16 @@ void loop()
       //Read and collect data from the IMU
       case read_IMU:
       {
-      
+        Serial.println("Getting IMU readings...");
         enableMuxPort(IMU_CHANNEL);
+        int i = 0;
+        while(i < 2048){
         myICM.getAGMT(); //updates the values
-        //printRawAGMT( myICM.agmt );
+        //printRawAGMT( myICM.agmt ); 
         convertRaw(myICM.agmt);
+        fillMatrix(i, myICM.agmt);
+        i++;
+        }
         waveHeight = myICM.accX();
         wavePeriod = myICM.magX();
         waveDirection = myICM.gyrX();
@@ -792,7 +813,7 @@ void loop()
       agtErr = modem.begin();
 
       //check signal
-      signalQuality = modem.getSignalQuality(signalQuality);
+      agtErr = modem.getSignalQuality(signalQuality);
       Serial.print(F("On a scale of 0 to 5, signal quality is currently "));
       Serial.print(signalQuality);
       Serial.println(F("."));
@@ -817,9 +838,9 @@ void loop()
 
         // Convert the floating point values into strings
         char latStr[15]; // latitude string
-        ftoa(agtLatitude,latStr,6,15);
+        ftoa(agtLatitude,latStr,5,15);
         char lonStr[15]; // longitude string
-        ftoa(agtLongitude,lonStr,6,15);
+        ftoa(agtLongitude,lonStr,5,15);
         char altStr[15]; // altitude string
         ftoa(agtAltitude,altStr,2,15);
         char vbatStr[6]; // battery voltage string
@@ -982,7 +1003,7 @@ void loop()
          
         
         Serial.end(); // Close the serial console
-        Serial.print("does this work?");
+        
         // Code taken (mostly) from Apollo3 Example6_Low_Power_Alarm
         
         // Disable ADC
@@ -1582,7 +1603,7 @@ void printRawAGMT(ICM_20948_AGMT_t agmt)
   }
 }*/
 
-
+//Converts the raw values from the icm to the scaled engineering values
 void convertRaw(ICM_20948_AGMT_t agmt){
   //constants
   int s2g = 16384;
@@ -1603,6 +1624,26 @@ void convertRaw(ICM_20948_AGMT_t agmt){
   agmt.mag.axes.y *= mScale;
   agmt.mag.axes.z *= mScale;
   
+  
+}
+
+
+//fills a 2048 x 10 matrix with the time and units of freedom
+ void fillMatrix(int i, ICM_20948_AGMT_t agmt){
+  
+    
+
+    accX[i] = (agmt.acc.axes.x);
+    accY[i] = (agmt.acc.axes.y);
+    accZ[i] = (agmt.acc.axes.z);
+
+    gyrX[i] = (agmt.gyr.axes.x);
+    gyrY[i] = (agmt.gyr.axes.y);
+    gyrZ[i] = (agmt.gyr.axes.z);
+
+    magX[i] = (agmt.mag.axes.x);
+    magY[i] = (agmt.mag.axes.y);
+    magZ[i] = (agmt.mag.axes.z);
   
 }
 
