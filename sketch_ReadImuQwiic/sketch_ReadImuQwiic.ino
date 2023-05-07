@@ -4,13 +4,35 @@
  */
 #include "ICM_20948.h" // Click here to get the library: http://librarymanager/All#SparkFun_ICM_20948_IMU
 #include <Wire.h>
+#include <string.h>
+#include <SD.h>
 #define SERIAL_PORT Serial
-#define LED 4
+
 
 // Parameters
 const int MUX_ADDR = 0x70;
 const int IMU_CHANNEL = 2;
 const int NIR_CHANNEL = 1;
+
+File imuFileRaw;
+
+//USED FOR TESTING SD CARD
+  // We didn't get a 3D fix so
+        // set the lat, long etc. to default values
+float agtVbat = 5.0; // Battery voltage
+float agtLatitude = 0.0; // Latitude in degrees
+float agtLongitude = 0.0; // Longitude in degrees
+long  agtAltitude = 0; // Altitude above Median Seal Level in m
+float agtSpeed = 0.0; // Ground speed in m/s
+byte  agtSatellites = 0; // Number of satellites (SVs) used in the solution
+long  agtCourse = 0; // Course (heading) in degrees
+int   agtPDOP = 0;  // Positional Dilution of Precision in m
+int   agtYear = 1970; // GNSS Year
+byte  agtMonth = 1; // GNSS month
+byte  agtDay = 1; // GNSS day
+byte  agtHour = 0; // GNSS hours
+byte  agtMinute = 0; // GNSS minutes
+byte  agtSecond = 0; // GNSS seconds
 
 // Pins
 const int PIN_RESET = 9;
@@ -24,6 +46,7 @@ const int DC_JUMPER = 1;
 
 // Globals
 ICM_20948_I2C myICM;
+//int clock[2048];
  float accX[2048];
   float accY[2048];
   float accZ[2048];
@@ -52,8 +75,7 @@ void setup() {
   myICM.begin();
   disableMuxPort(IMU_CHANNEL);
 
-    pinMode(LED, OUTPUT);
-  digitalWrite(LED, LOW);
+ 
 
   bool initialized = false;
   while (!initialized)
@@ -71,11 +93,11 @@ void setup() {
     {
       Serial.println("Trying again...");
       delay(500);
-      digitalWrite(LED, LOW);
+    
     }
     else
     {
-      digitalWrite(LED, HIGH);
+    
       initialized = true;
       Serial.println("Device Connected!");
     }
@@ -106,16 +128,64 @@ void loop() {
 
 
 
-  disableMuxPort(IMU_CHANNEL);
+  
     fillMatrix(i, myICM.agmt);
     i++;
     Serial.println(i);
   
   }//end while
-  printMatrix();
+        disableMuxPort(IMU_CHANNEL);
+          //save to SD card
+        //"YYYYMMDD_HHMMSS_IMUraw"
+        String fileName = String(agtYear) + String(agtMonth) + String(agtDay) + "_" + String(agtHour) + String(agtMinute) + String(agtSecond) + "_imuRaw.txt";
+        Serial.println(fileName);  //Filename for raw imu values
+        bool initialized;
+        Serial.print("Initializing SD card...");
 
-  break;
+        if (!SD.begin(4)) {
+        Serial.println("initialization failed!");
+        initialized = false;
+        while (1);
+       }
+       Serial.println("initialization done.");
+       initialized = true;
 
+          // open the file. note that only one file can be open at a time,
+          // so you have to close this one before opening another.
+          imuFileRaw = SD.open("fileName.txt", FILE_WRITE);
+
+          // if the file opened okay, write to it:
+          if (imuFileRaw) {
+          Serial.print("Writing to file...");
+          imuFileRaw.println(fileName + ":");
+          printMatrix(imuFileRaw);
+          imuFileRaw.println();
+          // close the file:
+          imuFileRaw.close();
+          Serial.println("done.");
+          } else {
+          // if the file didn't open, print an error:
+          Serial.println("error opening file");
+        }
+
+      // re-open the file for reading:
+      imuFileRaw = SD.open("fileName.txt");
+      if (imuFileRaw) {
+        Serial.println(fileName + ":");
+
+    // read from the file until there's nothing else in it:
+    while (imuFileRaw.available()) {
+      Serial.write(imuFileRaw.read());
+    }
+    // close the file:
+    imuFileRaw.close();
+  } else {
+    // if the file didn't open, print an error:
+    Serial.println("error opening file");
+  }
+  
+delay(100000);
+  
 }
 
 
@@ -330,6 +400,8 @@ void printScaledAGMT(ICM_20948_I2C *sensor)
 
   void fillMatrix(int i, ICM_20948_AGMT_t agmt){
   
+    //clock[i] = i;
+
     accX[i] = (agmt.acc.axes.x);
     accY[i] = (agmt.acc.axes.y);
     accZ[i] = (agmt.acc.axes.z);
@@ -344,27 +416,27 @@ void printScaledAGMT(ICM_20948_I2C *sensor)
   
 }
 
-
-void printMatrix(){
+//prints the matrix within the imu file for raw values
+void printMatrix(File& imuFileRaw){
   for(int y = 0; y < 2048; y++){
-    Serial.print(accX[y]);
-    Serial.print(", ");
-    Serial.print(accY[y]);
-    Serial.print(", ");
-    Serial.print(accZ[y]);
-    Serial.print(", ");
-    Serial.print(gyrX[y]);
-    Serial.print(", ");
-    Serial.print(gyrY[y]);
-    Serial.print(", ");
-    Serial.print(gyrZ[y]);
-    Serial.print(", ");
-    Serial.print(magX[y]);
-    Serial.print(", ");
-    Serial.print(magY[y]);
-    Serial.print(", ");
-    Serial.print(magZ[y]);
-    Serial.println();
+    imuFileRaw.print(accX[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(accY[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(accZ[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(gyrX[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(gyrY[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(gyrZ[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(magX[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(magY[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(magZ[y]);
+    imuFileRaw.println();
     
   }
   return;

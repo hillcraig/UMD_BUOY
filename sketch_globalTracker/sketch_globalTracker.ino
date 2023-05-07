@@ -1,12 +1,12 @@
 
 
 // Artemis Tracker pin definitions
-//#define spiCS1              4  // D4 can be used as an SPI chip select or as a general purpose IO pin
+#define spiCS1              4  // D4 can be used as an SPI chip select or as a general purpose IO pin
 #define geofencePin         10 // Input for the ZOE-M8Q's PIO14 (geofence) pin
 #define busVoltagePin       13 // Bus voltage divided by 3 (Analog in)
 #define iridiumSleep        17 // Iridium 9603N ON/OFF (sleep) pin: pull high to enable the 9603N
 #define iridiumNA           18 // Input for the Iridium 9603N Network Available
-#define LED                 4 // White LED
+#define LED                 13 // White LED
 #define iridiumPwrEN        22 // ADM4210 ON: pull high to enable power for the Iridium 9603N
 #define gnssEN              26 // GNSS Enable: pull low to enable power for the GNSS (via Q2)
 #define gnssBckpBatChgEN    44 // GNSS backup battery charge enable; when set as INPUT = disabled, when OUTPUT+LOW = charging.
@@ -31,11 +31,15 @@ IridiumSBD modem(Serial1, iridiumSleep, iridiumRI);
 
 #include "TSYS01.h"
 #include "ICM_20948.h"
+#include "String.h"
+#include <SD.h>
+
 
 //Globals
 ICM_20948_I2C myICM;
 TSYS01 waterSensor;
 TSYS01 airSensor;
+File imuFileRaw;
   
   float accX[2048];
   float accY[2048];
@@ -582,8 +586,10 @@ void loop()
         delay(20);
       }
       //average out temps
-      airTemp = average(airAVG);
-      waterTemp = average(waterAVG);
+      //airTemp = average(airAVG);
+      airTemp = airAVG[1];
+      waterTemp = waterAVG[1];
+      //waterTemp = average(waterAVG);
       Serial.print("Air Temp average is: ");
       Serial.println(airTemp);
       Serial.print("Water Temp average is: ");
@@ -607,6 +613,40 @@ void loop()
         fillMatrix(i, myICM.agmt);
         i++;
         }
+            //save to SD card
+        //"YYYYMMDD_HHMMSS_IMUraw"
+        String fileName = String(agtYear) + String(agtMonth) + String(agtDay) + "_" + String(agtHour) + String(agtMinute) + String(agtSecond) + "_imuRaw.txt";
+        Serial.println(fileName);  //Filename for raw imu values
+        bool initialized;
+        Serial.print("Initializing SD card...");
+
+        if (!SD.begin(4)) {
+        Serial.println("initialization failed!");
+        initialized = false;
+        while (1);
+       }
+       Serial.println("initialization done.");
+       initialized = true;
+
+          // open the file. note that only one file can be open at a time,
+          // so you have to close this one before opening another.
+          imuFileRaw = SD.open("imuFile.txt", FILE_WRITE);
+
+          // if the file opened okay, write to it:
+          if (imuFileRaw) {
+          Serial.print("Writing to file...");
+          imuFileRaw.println(fileName + ":");
+          printMatrix(imuFileRaw);
+          imuFileRaw.println();
+          // close the file:
+          imuFileRaw.close();
+          Serial.println("done.");
+          } else {
+          // if the file didn't open, print an error:
+          Serial.println("error opening file");
+        }
+
+
         waveHeight = myICM.accX();
         wavePeriod = myICM.magX();
         waveDirection = myICM.gyrX();
@@ -1645,5 +1685,32 @@ void convertRaw(ICM_20948_AGMT_t agmt){
     magY[i] = (agmt.mag.axes.y);
     magZ[i] = (agmt.mag.axes.z);
   
+}
+
+
+//prints the matrix within the imu file for raw values
+void printMatrix(File& imuFileRaw){
+  for(int y = 0; y < 2048; y++){
+    imuFileRaw.print(accX[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(accY[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(accZ[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(gyrX[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(gyrY[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(gyrZ[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(magX[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(magY[y]);
+    imuFileRaw.print(", ");
+    imuFileRaw.print(magZ[y]);
+    imuFileRaw.println();
+    
+  }
+  return;
 }
 
