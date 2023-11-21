@@ -61,21 +61,21 @@ float dissolvedOxygen[COLUMNS];
 
 // - - - - set ports for multiplexer - - - - -
 const int MUX_ADDR = 0x70;
-const int TSYS01_AIR_PORT = 0;
-const int TSYS01_WATER_PORT = 1;
-const int IMU_PORT = 2;  
+const int IMU_PORT = 0;
+const int TSYS01_AIR_PORT = 1;
+const int TSYS01_WATER_PORT = 2;
+const int CONDUCTIVITY_PORT = 4;    
 const int PH_PORT = 5; 
 const int DISSOLVED_OXYGEN_PORT = 6;   
-const int CONDUCTIVITY_PORT = 7;    
 
 void setup() {
   delay(5000);
-  serialDebug.begin(115200); //maybe 9600 instead
+  serialDebug.begin(115200); 
   notecard.begin();
   Wire.begin();
-  configureSensors();
-  setUpSD();                    
+  configureSensors();                  
   pinMode(indicatorPin,OUTPUT); //for LED
+  setUpSD();  
 
   #if NDEBUG
     notecard.setDebugOutputStream(serialDebug);
@@ -214,7 +214,7 @@ void sendData(){
       JAddStringToObject(body, "hh", hh);
       JAddStringToObject(body, "mm", mm);
       JAddStringToObject(body, "ss", ss);
-      JAddNumberToObject(body, "# of Satellites", sats);
+      JAddNumberToObject(body, "# of satellites", sats);
       JAddNumberToObject(body, "lat", lat);            
       JAddNumberToObject(body, "lon", lon);   
       JAddNumberToObject(body, "pH", getAverage(pH,COLUMNS));
@@ -388,27 +388,29 @@ void noGPS(){
 }
 
 //- - - - - access data from time request - - - - -
-void setTimeVars(){
+int setTimeVars(){
   serialDebug.println("start time func");
   time_t rawtime;//time object
   //request epoch time from notecard
   J *rsp = notecard.requestAndResponse(notecard.newRequest("card.time")); 
-  if (rsp != NULL) {
-     rawtime = JGetNumber(rsp, "time");  //store epoch time 
-     notecard.deleteResponse(rsp);
-  }
+  if(rsp == NULL) 
+    return -1;
+
+  rawtime = JGetNumber(rsp, "time");  //store epoch time 
+  notecard.deleteResponse(rsp);
 
   struct tm  ts;  
 
   // Format time, "yyyymmdd and hhmmss zzz" zzz? GMT
   ts = *localtime(&rawtime);
-  strftime(yyyy, sizeof(yyyy), ",Y", &ts); 
-  strftime(mM, sizeof(mM), ",m", &ts); 
-  strftime(dd, sizeof(dd), ",d", &ts); 
-  strftime(hh, sizeof(hh), ",H", &ts); 
-  strftime(mm, sizeof(mm), ",M", &ts); 
-  strftime(ss, sizeof(ss), ",S", &ts); 
+  strftime(yyyy, sizeof(yyyy), "%Y", &ts); 
+  strftime(mM, sizeof(mM), "%m", &ts); 
+  strftime(dd, sizeof(dd), "%d", &ts); 
+  strftime(hh, sizeof(hh), "%H", &ts); 
+  strftime(mm, sizeof(mm), "%M", &ts); 
+  strftime(ss, sizeof(ss), "%S", &ts); 
 
+  return 0;
 }
 
 //  - - - - - - - - - - parse # satellites - - - - - - - - - -
@@ -609,6 +611,7 @@ void setUpSD(){
   Serial.print("Initializing SD card...");
   if (!SD.begin(chipSelect)) {
     Serial.println("initialization failed!");
+    digitalWrite(indicatorPin,HIGH);
     while (1);
   }
   Serial.println("initialization done.");
@@ -638,7 +641,11 @@ void setUpSD(){
 void writeToMainFile(){
   myFile = SD.open("buoy.txt", FILE_WRITE);
   if (myFile) {
-      myFile.print("");
+    myFile.print("");
     myFile.close();
+  }else{
+    serialDebug.println("opening file issue. You need to cry and stop everything");
+    digitalWrite(indicatorPin,HIGH);
+    while(true);
   }
 }
