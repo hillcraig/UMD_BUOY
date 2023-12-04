@@ -1,7 +1,7 @@
 /*
- *  LTE_Buoy.ino
+ *  First_Deploy.ino
  *  Liam Gaeuman @ University of Minnesota Duluth
- *  5/9/23
+ *  11/28/23
  */
 
 #include "Notecard.h" 
@@ -18,11 +18,17 @@
 
 #define serialDebug Serial
 #define productUID "com.gmail.liamgaeuman:environmental_monitoring_buoy" 
-#define NDEBUG 1
-
 #ifndef ARDUINO_SWAN_R5
 #error "This program was designed to run on the Blues Wireless Swan"
 #endif
+
+//toggle steps, 1 on or 0 off
+#define NDEBUG 1
+#define SAMPLE_IMU 1
+#define RECORD_OTHER_SENSORS 1
+#define GPS_CONNECT 0
+#define SEND_DATA 0
+#define WAIT 1
 
 //- - - - - declare sensors - - - - - - - - - 
 Notecard notecard;            //notecard object
@@ -41,12 +47,12 @@ int IMU_SAMPLE_SIZE = 4608;
 int array_index;
 
 //- - - - - init data fields - - - - - - - - - 
-char yyyy[5][2];   //year   yyyy
-char mM[3][2];     //month  mm
-char dd[3][2];     //day    dd
-char hh[3][2];     //hour   hh
-char mm[3][2];     //minute mm
-char ss[3][2];     //second ss
+char yyyy[2][5];   //year   yyyy
+char mM[2][3];     //month  mm
+char dd[2][3];     //day    dd
+char hh[2][3];     //hour   hh
+char mm[2][3];     //minute mm
+char ss[2][3];     //second ss
 double lat[2];     //lat    ##.#####
 double lon[2];     //lon    ##.#####
 int sats[2];       //number of GPS satellites
@@ -73,12 +79,6 @@ void setup() {
 
   configureSensors();                  
   error += setUpSD(); 
-
-  if (error < 0) 
-    error += setUpSD();
-
-  if (error < 0) 
-    error += setUpSD();
 
   #if NDEBUG
     notecard.setDebugOutputStream(serialDebug);
@@ -116,15 +116,23 @@ void loop() {
   serialDebug.println("main loop start"); 
   array_index = 0;
 
+  #if GPS_CONNECT
   serialDebug.println("obtaing GPS Connectin");
   blinkLED(100);
   if(connectToGPS() < 0){
+    noGPS();
+    setTimeVars();
     serialDebug.println("error obtaining GPS connection");
     blinkLED(-1);
     delay(500);
     blinkLED(2); //state 2
   }
+  #else
+  noGPS();
+  setTimeVars();
+  #endif
 
+  #if RECORD_OTHER_SENSORS
   blinkLED(100);
   serialDebug.println("collecting data");
   if(collectData() < 0){
@@ -133,7 +141,11 @@ void loop() {
     delay(500);
     blinkLED(3); //state 3
   }
+  #endif
 
+  array_index = 1;
+
+  #if SAMPLE_IMU
   blinkLED(100);
   serialDebug.println("collecting IMU data");
   if(sample_IMU() < 0){
@@ -142,18 +154,25 @@ void loop() {
     delay(500);
     blinkLED(4); //state 4
   }
+  #endif
 
-  array_index = 1;
- 
+  #if GPS_CONNECT
   blinkLED(100);
   serialDebug.println("obtaing 2nd GPS connectin");
   if(connectToGPS() < 0){
+    noGPS();
+    setTimeVars();
     serialDebug.println("error obtaining 2nd GPS connection");
     blinkLED(-1);
     delay(500);
     blinkLED(5); //state 5
   }
+  #else
+  noGPS();
+  setTimeVars();
+  #endif
 
+  #if RECORD_OTHER_SENSORS
   blinkLED(100);
   serialDebug.println("collecting data");
   if(collectData() < 0){
@@ -162,7 +181,9 @@ void loop() {
     delay(500);
     blinkLED(6); //state 6
   }
+  #endif
 
+  #if SEND_DATA
   blinkLED(100);
   serialDebug.println("sending data");
   if(sendData() < 0){
@@ -171,6 +192,7 @@ void loop() {
     delay(500);
     blinkLED(7); //state 7
   }
+  #endif
 
   blinkLED(100);
   serialDebug.println("writing to SD");
@@ -180,8 +202,14 @@ void loop() {
     delay(500);
     blinkLED(8); //state 8
   }
-    
+  
+  #if WAIT
+  serialDebug.println("waiting");
+  blinkLED(100);
+  blinkLED(100);
+  blinkLED(100);
   while(millis() < mainLoopTime + 30 * 60000); //must take exactly 30 minutes before it restarts
+  #endif
 }
 
 void blinkLED(int x){
@@ -247,10 +275,11 @@ int connectToGPS(){
     // Check if GPS/GNSS has acquired location information
     J *rsp = notecard.requestAndResponse(notecard.newRequest("card.location"));
     if (JGetInt(rsp, "time") != gps_time_s) {   //once updated, location info will have a new time
+      
+      setTimeVars();
       setLocationVars(rsp);        
       notecard.deleteResponse(rsp);
-      setTimeVars();
-
+      
       // Restore previous configuration
       J *req = notecard.newRequest("card.location.mode");
       JAddStringToObject(req, "mode", "periodic");
@@ -271,9 +300,6 @@ int connectToGPS(){
     delay(2000);
   }
 
-  noGPS();
-  setTimeVars();
-  serialDebug.println("GPS connection unsuccesful :(\n");
   return -1; //gps connection failed
 }
 
@@ -424,14 +450,20 @@ void noGPS(){
 int setTimeVars(){
   serialDebug.println("start time func");
   time_t rawtime;//time object
+
   //request epoch time from notecard
   J *rsp = notecard.requestAndResponse(notecard.newRequest("card.time")); 
   if(rsp == NULL){
-
     return -1;
   }
 
   rawtime = JGetNumber(rsp, "time");  //store epoch time 
+
+  lon[array_index] = JGetNumber(rsp, "lon"); 
+  lon[array_index] = (floor(100000*lon[array_index])/100000); 
+  lat[array_index] = JGetNumber(rsp, "lat");
+  lat[array_index] = (floor(100000*lat[array_index])/100000);
+
   notecard.deleteResponse(rsp);
 
   struct tm  ts;  
@@ -487,82 +519,36 @@ float getAverage(float arr[], int n) {
 
 // - - - functions for computing wave statistics - - - 
 int sample_IMU(){
-  
-  enableMuxPort(IMU_PORT);
 
-  /*har a[5];   //year   yyyy 
-  char b[3];     //month  mm 
-  char c[3];     //day    dd 
-  char d[3];     //hour   hh   
-  char e[3];     //minute mm 
-  char f[3];     //second ss*/
+  setTimeVars();
+
+  enableMuxPort(IMU_PORT);
   
   size_t start_ms = ::millis();
 
-  /*time_t rawtime;//time object
-  //request epoch time from notecard
-  J *rsp = notecard.requestAndResponse(notecard.newRequest("card.time")); 
-  if(rsp == NULL) 
-    return -1;
-
-  rawtime = JGetNumber(rsp, "time");  //store epoch time 
-  notecard.deleteResponse(rsp);
-
-  struct tm  ts;  
-  
-  ts = *localtime(&rawtime);
-  
-  strftime(a, 5, "%Y", &ts); 
-  strftime(b, 3, "%m", &ts); 
-  strftime(c, 3, "%d", &ts); 
-  strftime(d, 3, "%H", &ts); 
-  strftime(e, 3, "%M", &ts); 
-  strftime(f, 3, "%S", &ts); 
-
-  String fileName = String(ts.tm_yday + 1) + d + b + "I.txt";*/
   myFile = SD.open("waves.txt", FILE_WRITE);   
   
   if(myFile){
     
     serialDebug.println("file was made");
 
-    /*serialDebug.print(a);
-    serialDebug.print(",");
-    serialDebug.print(b);
-    serialDebug.print(",");
-    serialDebug.print(c);
-    serialDebug.print(",");
-    serialDebug.print(d);
-    serialDebug.print(",");
-    serialDebug.print(e);
-    serialDebug.print(",");
-    serialDebug.print(f);
-    serialDebug.print(",");
-    serialDebug.print(lat[0]);
-    serialDebug.print(",");
-    serialDebug.print(lon[0]);
-    serialDebug.print(",");
-    serialDebug.println("4 Hz");
-
-    myFile.println("YYYY, MM, DD, hh, mm, ss, lat, lon, sample rate");
-
-    myFile.print(a);
+    myFile.print(yyyy[array_index]);
     myFile.print(",");
-    myFile.print(b);
+    myFile.print(mM[array_index]);
     myFile.print(",");
-    myFile.print(c);
+    myFile.print(dd[array_index]);
     myFile.print(",");
-    myFile.print(d);
+    myFile.print(hh[array_index]);
     myFile.print(",");
-    myFile.print(e);
+    myFile.print(mm[array_index]);
     myFile.print(",");
-    myFile.print(f);
+    myFile.print(ss[array_index]);
     myFile.print(",");
-    myFile.print(lat[0]);
+    myFile.print(sats[array_index]);
     myFile.print(",");
-    myFile.print(lon[0]);
+    myFile.print(lat[array_index]);
     myFile.print(",");
-    myFile.println("4 Hz");*/
+    myFile.println(lon[array_index]);
 
     myFile.println("Ax (m/s^2),Ay (m/s^2),Az (m/s^2),Gx (deg/sec),Gy (deg/sec),Gz (deg/sec),Mx (mTesla),My (mTesla),Mz (mTesla)");
 
@@ -573,23 +559,23 @@ int sample_IMU(){
       
         myICM.getAGMT();  
   
-        myFile.print(myICM.agmt.acc.axes.x/1000);
+        myFile.print(myICM.accX()/1000); // g's
         myFile.print(",");
-        myFile.print(myICM.agmt.acc.axes.y/1000);
+        myFile.print(myICM.accY()/1000); // g's
         myFile.print(",");
-        myFile.print(myICM.agmt.acc.axes.z/1000);
+        myFile.print(myICM.accZ()/1000); // g's
         myFile.print(",");
-        myFile.print(myICM.agmt.gyr.axes.x);
+        myFile.print(myICM.gyrX()); // degrees per second
         myFile.print(",");
-        myFile.print(myICM.agmt.gyr.axes.y);
+        myFile.print(myICM.gyrY()); // degrees per second
         myFile.print(",");
-        myFile.print(myICM.agmt.gyr.axes.z);
+        myFile.print(myICM.gyrZ()); // degrees per second
         myFile.print(",");
-        myFile.print(myICM.agmt.mag.axes.x);
+        myFile.print(myICM.magX());  // micro teslas
         myFile.print(",");
-        myFile.print(myICM.agmt.mag.axes.y);
+        myFile.print(myICM.magY());  // micro teslas
         myFile.print(",");
-        myFile.println(myICM.agmt.mag.axes.z);
+        myFile.println(myICM.magZ());// micro teslas
   
         count++;
       }
@@ -613,6 +599,7 @@ int sample_IMU(){
 //  - - - - - - - - - - - - - - - - - - - - - 
 
 int configureSensors(){
+  #if SAMPLE_IMU
   enableMuxPort(IMU_PORT);
   while(true){
     myICM.begin(Wire, 1);
@@ -621,6 +608,7 @@ int configureSensors(){
     delay(500);
   }
   disableMuxPort(IMU_PORT);
+  #endif
 
   enableMuxPort(TSYS01_AIR_PORT);
   airTempSensor.init();
@@ -727,11 +715,14 @@ int writeToMainFile(){
       myFile.print(airTemp[i]);
       myFile.print(",");
       myFile.println(waterTemp[i]);
-      myFile.close();
     }
+    myFile.close();
     return 0;
   }
 
-  serialDebug.println("opening file issue. You need to cry and stop everything");
   return -1;
 }
+
+
+
+

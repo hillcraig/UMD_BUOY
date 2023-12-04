@@ -21,7 +21,7 @@
             ],
             "intelliSenseMode": "gcc-x64",
             "includePath": [
-                "/Users/liamgaeuman/Documents/Random Programming stuff/Buoy Project/UMD_BUOY/LTE_Buoy",
+                "/Users/liamgaeuman/Documents/Random Programming stuff/Buoy Project/UMD_BUOY/First_Deploy",
                 "/Users/liamgaeuman/Library/Arduino15/packages/STMicroelectronics/hardware/stm32/2.4.0/cores/arduino/avr",
                 "/Users/liamgaeuman/Library/Arduino15/packages/STMicroelectronics/hardware/stm32/2.4.0/cores/arduino/stm32",
                 "/Users/liamgaeuman/Library/Arduino15/packages/STMicroelectronics/hardware/stm32/2.4.0/cores/arduino/stm32/LL",
