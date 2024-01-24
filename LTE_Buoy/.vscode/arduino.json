@@ -1,6 +1,0 @@
-{
-    "configuration": "pnum=SWAN_R5,upload_method=dfuMethod,xserial=generic,usb=CDCgen,xusb=FS,opt=osstd,dbg=none,rtlib=nano",
-    "board": "STMicroelectronics:stm32:BluesW",
-    "sketch": "First_Deploy.ino",
-    "port": "/dev/tty.usbmodem2038375D55521"
-}
