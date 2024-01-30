@@ -68,7 +68,9 @@ float airTemp[2];
 float waterTemp[2];
 float conductivity[2];
 float dissolvedOxygen[2];
-float pH[2];    
+float pH[2];  
+
+float voltage[2];      
 
 char doy[4]; //day of year
 
@@ -79,9 +81,10 @@ const int TSYS01_AIR_PORT = 1;
 const int TSYS01_WATER_PORT = 4;
 const int EC_PORT = 5;
 const int PH_PORT = 3;
-const int DO_PORT = 0;
+const int DO_PORT = 2;
 
-void setup() {
+void setup()
+{
   int error = 0;
   delay(5000);
 
@@ -126,7 +129,8 @@ void setup() {
 /*
  * time: 30 minutes
  */
-void loop() { 
+void loop()
+{ 
   mainLoopTime = millis();
   serialDebug.println("main loop start"); 
   array_index = 0;
@@ -230,7 +234,8 @@ void loop() {
   #endif
 }
 
-void blinkLED(int x){
+void blinkLED(int x)
+{
   int i;
   if(x == 100){
     for(i = 0; i < 10; i++){
@@ -255,7 +260,8 @@ void blinkLED(int x){
   }
 }
 
-int collectOtherData(){
+int collectOtherData()
+{
     #if TEMP_SENSORS
     getTemp(TSYS01_AIR_PORT, airTempSensor, airTemp);
     getTemp(TSYS01_WATER_PORT, waterTempSensor, waterTemp);
@@ -267,12 +273,14 @@ int collectOtherData(){
     getWaterQualitySesnorReadings(PH_PORT, PH, pH, WQS);
     #endif
 
+    getVoltage();
+
     return 0;
 }
 
 #if GPS_CONNECT
-int connectToGPS(){
-  
+int connectToGPS()
+{  
   // Save the time from the last location reading.
   J *rsp = notecard.requestAndResponse(notecard.newRequest("card.location"));
   size_t gps_time_s = JGetInt(rsp, "time");
@@ -309,7 +317,7 @@ int connectToGPS(){
       J *req = notecard.newRequest("card.location.mode");
       JAddStringToObject(req, "mode", "periodic");
       notecard.sendRequest(req);
-      serialDebug.println("GPS connection succesful :)\n");
+      serialDebug.println("GPS connection successful :)\n");
       return 0; //gps connection success
     }
   
@@ -324,13 +332,13 @@ int connectToGPS(){
     // Wait 2 seconds before tryring again 
     delay(2000);
   }
-
   return -1; //gps connection failed
 }
 #endif
 
 #if SEND_DATA
-int sendData(){
+int sendData()
+{
   //send to cloud
   J *req = notecard.newRequest("note.add");  //create note request 
   if (req != NULL)
@@ -358,6 +366,7 @@ int sendData(){
       JAddNumberToObject(body, "dissolved oxygen", dissolvedOxygen[i]);
       JAddNumberToObject(body, "conductivity", conductivity[i]);
       JAddNumberToObject(body, "pH", pH[i]);
+      JAddNumberToObject(body, "voltage", voltage[i]);
     }
     if (!notecard.sendRequest(req)) {
       JDelete(req);
@@ -373,7 +382,8 @@ int sendData(){
  * time: 2 sec
  * samples: 20
  */
-void getTemp(int port, TSYS01 tempSensor, float* arr){
+void getTemp(int port, TSYS01 tempSensor, float* arr)
+{
 
   enableMuxPort(port);
   
@@ -402,8 +412,8 @@ void getTemp(int port, TSYS01 tempSensor, float* arr){
  * samples: 20
  */
 #if WATER_QUALITY_SENSORS
-int getWaterQualitySesnorReadings(int port, Ezo_board sensor, float* arr, int samples){
-  
+int getWaterQualitySesnorReadings(int port, Ezo_board sensor, float* arr, int samples)
+{  
   enableMuxPort(port);
   
   float sumOfReadings = 0;
@@ -427,11 +437,20 @@ int getWaterQualitySesnorReadings(int port, Ezo_board sensor, float* arr, int sa
 }
 #endif
 
+void getVoltage()
+{
+  J *req = NoteNewRequest("card.voltage");
+  JAddStringToObject(req, "mode", "?");
+  
+  J *rsp = notecard.requestAndResponse(req);
+  voltage[array_index] = JGetNumber(rsp, "value");
+  notecard.deleteResponse(rsp);
+}
 
 //- - - - - - - access data from location request - - - - -> 
 #if GPS_CONNECT
-int setLocationVars(J *rsp){  
-
+int setLocationVars(J *rsp)
+{  
   serialDebug.println("start location func");
   if (rsp == NULL) 
     return -1;
@@ -447,14 +466,16 @@ int setLocationVars(J *rsp){
 #endif
 
 //if GPS can't acquire location info, set all fields to 0
-void noGPS(){
+void noGPS()
+{
   lat[array_index]=0;
   lon[array_index]=0;
   sats[array_index]=0;
 }
 
 //- - - - - access data from time request - - - - -
-int setTimeVars(){
+int setTimeVars()
+{
   serialDebug.println("start time func");
   time_t rawtime;//time object
 
@@ -523,8 +544,8 @@ float getAverage(float arr[], int n) {
 
 // - - - functions for computing wave statistics - - - 
 #if SAMPLE_IMU
-int sample_IMU(){
-
+int sample_IMU()
+{
   setTimeVars();
 
   char filename[13];
@@ -575,7 +596,6 @@ int sample_IMU(){
 
     while(count < IMU_SAMPLE_SIZE){
       if(millis() >= start_ms + 250 * count && myICM.dataReady()){
-      
         myICM.getAGMT();  
 
         array[0][count] = myICM.accX()/1000 * GRAVITY;
@@ -608,13 +628,11 @@ int sample_IMU(){
   
         count++;
       }
-
     }
 
     WaveProcessor waveProcessor = WaveProcessor(array);
     float x = waveProcessor.getHeight();
     serialDebug.println(x);
-
 
     for(int i = 0; i<9; i++)
       delete[] array[i];
@@ -627,7 +645,6 @@ int sample_IMU(){
     serialDebug.println("ERROR: file was not made");
     return -1;
   }
-
   disableMuxPort(IMU_PORT);
   return 0;
 }
@@ -636,8 +653,8 @@ int sample_IMU(){
 //  - - - - - - - - - - - - - - - - - - - - - 
 //     function to configure sensors  
 //  - - - - - - - - - - - - - - - - - - - - - 
-
-int configureSensors(){
+int configureSensors()
+{
   #if SAMPLE_IMU
   enableMuxPort(IMU_PORT);
   while(true){
@@ -712,8 +729,8 @@ int disableMuxPort(byte portNumber)
 //              SD card stuff 
 //  - - - - - - - - - - - - - - - - - - -  
 #if WRITE_MAIN || SAMPLE_IMU
-int setUpSD(){
-
+int setUpSD()
+{
   Serial.print("Initializing SD card...");
   if (SD.begin(chipSelect)) {
 
@@ -733,8 +750,8 @@ int setUpSD(){
 #endif
 
 #if WRITE_MAIN
-int writeToMainFile(){
-  
+int writeToMainFile()
+{
   char filename[13];
   strcpy(filename, "BUOY");
   strcat(filename, yyyy[array_index]);
@@ -770,7 +787,9 @@ int writeToMainFile(){
       myFile.print(",");
       myFile.print(dissolvedOxygen[i]);
       myFile.print(",");
-      myFile.println(pH[i]);
+      myFile.print(pH[i]);
+      myFile.print(",");
+      myFile.println(voltage[i]);
     }
     myFile.close();
     return 0;
