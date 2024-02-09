@@ -1,7 +1,7 @@
 /*
  *  LTE_Buoy.ino
  *  Liam Gaeuman @ University of Minnesota Duluth
- *  1/11/24
+ *  1/31/24
  */
 
 #include "Notecard.h" 
@@ -21,39 +21,44 @@
 #error "This program was designed to run on the Blues Wireless Swan"
 #endif
 
-//toggle steps, 1 on or 0 off
+//toggle steps: 1 on, 0 off
 //only use 0 for testing purposes 
-#define NDEBUG 1                 // 
-#define SAMPLE_IMU 1             // 
-#define TEMP_SENSORS 1           // 
-#define WATER_QUALITY_SENSORS 1  // 
-#define GPS_CONNECT 1            // 
-#define SEND_DATA 1              // 
-#define WRITE_MAIN 1             // 
-#define WAVE_STATS 1             // 
-#define WAIT 1                   // 
+#define NDEBUG 1                  
+#define SAMPLE_IMU 1              
+#define TEMP_SENSORS 1            
+#define WATER_QUALITY_SENSORS 1   
+#define VOLTAGE 1                
+#define GPS_CONNECT 1            
+#define SEND_DATA 1               
+#define WRITE_MAIN 1              
+#define WAVE_STATS 1              
+#define WAIT 1    
 
-//- - - - - declare sensors - - - - - - - - -  
+//- - - - - declare I2C addresses - - - - - - - - -
+const int MUX_ADDR = 0x70;
+const int EC_ADDR = 100;
+const int DO_ADDR = 97;
+const int PH_ADDR = 99;
+
+// - - - - - set ports for multiplexer - - - - - - - 
+const int IMU_PORT = 0;
+const int TSYS01_AIR_PORT = 1;
+const int TSYS01_WATER_PORT = 4;
+const int EC_PORT = 5;
+const int PH_PORT = 3;
+const int DO_PORT = 2;
+
+//- - - - - - declare sensors - - - - - - - - - - -
 Notecard notecard;        //notecard object
 TSYS01 airTempSensor;     //sesnor used to collect air temperature
 TSYS01 waterTempSensor;   //sesnor used to collect water temperature
 ICM_20948_I2C myICM;      //sensor for motion 
 
-Ezo_board EC = Ezo_board(100, "EC");
-Ezo_board DO = Ezo_board(97, "DO");
-Ezo_board PH = Ezo_board(99, "PH"); //might need to go through mux before constructor is called...
+Ezo_board EC = Ezo_board(EC_ADDR, "EC");
+Ezo_board DO = Ezo_board(DO_ADDR, "DO");  
+Ezo_board PH = Ezo_board(PH_ADDR, "PH"); 
 
-//- - - - - - other variables - - - - - - - - 
-const byte chipSelect = A5;     //selector for SD
-const byte indicatorPin = A4;  //selecter for LED    
-float GRAVITY = 9.8;
-int WQS = 10; 
-int IMU_SAMPLE_SIZE = 4608;             
-File myFile;
-size_t mainLoopTime;           //stores time for main loop
-int array_index;
-
-//- - - - - init data fields - - - - - - - - - 
+//- - - - - - init data fields - - - - - - - - - - - 
 char yyyy[2][5];   //year   yyyy
 char mM[2][3];     //month  mm
 char dd[2][3];     //day    dd
@@ -63,32 +68,34 @@ char ss[2][3];     //second ss
 double lat[2];     //lat    ##.#####
 double lon[2];     //lon    ##.#####
 int sats[2];       //number of GPS satellites
+char doy[4];       //day of year
 
 float airTemp[2];          
 float waterTemp[2];
 float conductivity[2];
 float dissolvedOxygen[2];
 float pH[2];  
+float voltage[2];
 
-float voltage[2];      
+//- - - - - - other variables - - - - - - - - 
+const byte SD_PIN = A5;             //selector for SD
+const byte LED_PIN = A4;            //selecter for LED    
+const int WQS = 10;                 //number of samples to take for each water quality sensor
+const float GRAVITY = 9.8;          //
+const int IMU_SAMPLE_SIZE = 4608;   //            
+File myFile;                        //
+size_t mainLoopTime;                //stores time for main loop
+int array_index;                    // 
 
-char doy[4]; //day of year
-
-// - - - - set ports for multiplexer - - - - -
-const int MUX_ADDR = 0x70;
-const int IMU_PORT = 0;
-const int TSYS01_AIR_PORT = 1;
-const int TSYS01_WATER_PORT = 4;
-const int EC_PORT = 5;
-const int PH_PORT = 3;
-const int DO_PORT = 2;
+//error state blink enum -> 
+enum states {SETUP_STATE, GPS_STATE, COLLECT_DATA_STATE, IMU_STATE, SEND_STATE, WRITE_STATE};
 
 void setup()
 {
   int error = 0;
   delay(5000);
 
-  pinMode(indicatorPin, OUTPUT); //setup LED
+  pinMode(LED_PIN, OUTPUT); //setup LED
   serialDebug.begin(115200); 
   notecard.begin();
   Wire.begin();
@@ -122,7 +129,7 @@ void setup()
     serialDebug.println("error in setup");
     blinkLED(-1);
     delay(500);
-    blinkLED(1); //state 1
+    blinkLED(SETUP_STATE); 
   }
 }
 
@@ -144,7 +151,7 @@ void loop()
     serialDebug.println("error obtaining GPS connection");
     blinkLED(-1);
     delay(500);
-    blinkLED(2); //state 2
+    blinkLED(GPS_STATE); 
   }
   #else
   noGPS();
@@ -157,7 +164,7 @@ void loop()
     serialDebug.println("error collecting data");
     blinkLED(-1);
     delay(500);
-    blinkLED(3); //state 3
+    blinkLED(COLLECT_DATA_STATE); 
   }
 
   array_index = 1;
@@ -169,26 +176,25 @@ void loop()
     serialDebug.println("error sampling IMU");
     blinkLED(-1);
     delay(500);
-    blinkLED(4); //state 4
+    blinkLED(IMU_STATE); 
   }
   #endif
 
   #if GPS_CONNECT
   blinkLED(100);
-  serialDebug.println("obtaing 2nd GPS connectin");
+  serialDebug.println("obtaing 2nd GPS connectiin");
   if(connectToGPS() < 0){
     noGPS();
     setTimeVars();
     serialDebug.println("error obtaining 2nd GPS connection");
     blinkLED(-1);
     delay(500);
-    blinkLED(5); //state 5
+    blinkLED(GPS_STATE); 
   }
   #else
   noGPS();
   setTimeVars();
   #endif
-
   
   blinkLED(100);
   serialDebug.println("collecting data");
@@ -196,9 +202,8 @@ void loop()
     serialDebug.println("error collecting data");
     blinkLED(-1);
     delay(500);
-    blinkLED(6); //state 6
+    blinkLED(COLLECT_DATA_STATE); 
   }
-
 
   #if SEND_DATA
   blinkLED(100);
@@ -207,7 +212,7 @@ void loop()
     serialDebug.println("error sending data");
     blinkLED(-1);
     delay(500);
-    blinkLED(7); //state 7
+    blinkLED(SEND_STATE); 
   }
   #endif
 
@@ -218,45 +223,40 @@ void loop()
     serialDebug.println("error writing to SD");
     blinkLED(-1);
     delay(500);
-    blinkLED(8); //state 8
+    blinkLED(WRITE_STATE); 
   }
   #endif
   
   #if WAIT
   serialDebug.println("waiting");
-  while(millis() < mainLoopTime + 30 * 60000){ //must take exactly 30 minutes before it restarts
-    digitalWrite(indicatorPin, HIGH);
-    delay(100);
-    digitalWrite(indicatorPin, LOW);
-    delay(300);
+  while(millis() < mainLoopTime + 30 * 60000){ //must take exactly 30 minutes before it restarts 
   }
-  digitalWrite(indicatorPin, LOW);
   #endif
 }
 
-void blinkLED(int x)
+void blinkLED(int x) //rewrite this, ewwwwwwwwwwww
 {
   int i;
   if(x == 100){
     for(i = 0; i < 10; i++){
-      digitalWrite(indicatorPin, HIGH);  
+      digitalWrite(LED_PIN, HIGH);  
       delay(100);
-      digitalWrite(indicatorPin, LOW);
+      digitalWrite(LED_PIN, LOW);
       delay(100);
     }
   }
   else if (x >= 0 ){
-    for(i=0; i < x; i++){
-      digitalWrite(indicatorPin, HIGH);  
+    for(i=0; i < x+1; i++){
+      digitalWrite(LED_PIN, HIGH);  
       delay(500);
-      digitalWrite(indicatorPin, LOW);
+      digitalWrite(LED_PIN, LOW);
       delay(250);
     }
   }
   else{
-    digitalWrite(indicatorPin, HIGH);  
-    delay(2000);
-    digitalWrite(indicatorPin, LOW);
+    digitalWrite(LED_PIN, HIGH);  
+    delay(4000);
+    digitalWrite(LED_PIN, LOW);
   }
 }
 
@@ -273,7 +273,9 @@ int collectOtherData()
     getWaterQualitySesnorReadings(PH_PORT, PH, pH, WQS);
     #endif
 
+    #if VOLTAGE
     getVoltage();
+    #endif
 
     return 0;
 }
@@ -283,7 +285,7 @@ int connectToGPS()
 {  
   // Save the time from the last location reading.
   J *rsp = notecard.requestAndResponse(notecard.newRequest("card.location"));
-  size_t gps_time_s = JGetInt(rsp, "time");
+  size_t previous_gps_time_s = JGetInt(rsp, "time");
   notecard.deleteResponse(rsp);
   
   // Set the location mode to "continuous" mode to force the
@@ -307,7 +309,7 @@ int connectToGPS()
   
     // Check if GPS/GNSS has acquired location information
     J *rsp = notecard.requestAndResponse(notecard.newRequest("card.location"));
-    if (JGetInt(rsp, "time") != gps_time_s) {   //once updated, location info will have a new time
+    if (JGetInt(rsp, "time") != previous_gps_time_s) {   //once updated, location info will have a new time
       
       setTimeVars();
       setLocationVars(rsp);        
@@ -428,10 +430,6 @@ int getWaterQualitySesnorReadings(int port, Ezo_board sensor, float* arr, int sa
   }
 
   arr[array_index] = sumOfReadings/NUM_READINGS;
-
-  serialDebug.println("- - - - - -");
-  serialDebug.println(arr[array_index]);
-  serialDebug.println("- - - - - -");
 
   disableMuxPort(port);
 }
@@ -732,7 +730,7 @@ int disableMuxPort(byte portNumber)
 int setUpSD()
 {
   Serial.print("Initializing SD card...");
-  if (SD.begin(chipSelect)) {
+  if (SD.begin(SD_PIN)) {
 
     Serial.println("initialization done.");
     myFile = SD.open("test.txt", FILE_WRITE);
