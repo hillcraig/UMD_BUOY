@@ -1,7 +1,7 @@
 /*
  *  LTE_Buoy.ino
  *  Liam Gaeuman @ University of Minnesota Duluth
- *  4/2/24
+ *  5/24/24
  */
 
 #include "Notecard.h" 
@@ -9,12 +9,15 @@
 #include "ICM_20948.h"
 #include "Ezo_i2c.h" 
 #include "SparkFun_MS5803_I2C.h"
+#include "SparkFun_I2C_Mux_Arduino_Library.h"
+#include "WaveProcessor.h"
 #include <time.h> 
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
 #include <Servo.h>
 #include <math.h> 
+#include <IWatchdog.h>
 
 #define serialDebug Serial
 #define productUID "com.gmail.liamgaeuman:environmental_monitoring_buoy" 
@@ -23,39 +26,43 @@
 #endif
 
 //toggle steps: 1 on, 0 off
-//only use 0 for testing purposes 
-#define NDEBUG 1                  
+//only use 0 for testing purposes except for NDBUG which should be 0 for deployment 
+#define NDEBUG 0                  
 #define SAMPLE_IMU 1                           
-#define GPS_CONNECT 1  
+#define GPS_CONNECT 1 
 #define OTHER_DATA 1          
 #define SEND_DATA 1               
 #define WRITE_MAIN 1                           
 #define WAIT 1    
 
 //- - - - - declare I2C addresses - - - - - - - - -
-const int MUX_ADDR = 0x70;
-const int EC_ADDR = 100;
-const int DO_ADDR = 97;
-const int PH_ADDR = 99;
+const byte EC_ADDR = 100;
+const byte PH_ADDR = 99;
+const byte ORP_ADDR = 98;
+const byte DO_ADDR = 97;
+const byte RTD_ADDR = 102;
 
 // - - - - - set ports for multiplexer - - - - - - - 
-const byte IMU_PORT = 0;
+const byte IMU_PORT = 1;
 const byte TSYS01_AIR_PORT = 1;
-const byte TSYS01_WATER_PORT = 4;
 const byte EC_PORT = 5;
 const byte PH_PORT = 3;
 const byte DO_PORT = 2;
+const byte ORP_PORT = 7;
+const byte RTD_PORT = 4;
 const byte PRESSURE_PORT = 6;
 
 //- - - - - - declare sensors - - - - - - - - - - -
 Notecard notecard;        //notecard object
+QWIICMUX myMux;           //multiplexer
 TSYS01 airTempSensor;     //sesnor used to collect air temperature
-TSYS01 waterTempSensor;   //sesnor used to collect water temperature
 ICM_20948_I2C myICM;      //sensor for motion 
 MS5803 pressureSensor(ADDRESS_HIGH);  //pressure
 Ezo_board EC = Ezo_board(EC_ADDR, "EC");
 Ezo_board DO = Ezo_board(DO_ADDR, "DO");  
 Ezo_board PH = Ezo_board(PH_ADDR, "PH"); 
+Ezo_board ORP = Ezo_board(ORP_ADDR, "ORP"); 
+Ezo_board RTD = Ezo_board(RTD_ADDR, "RTD"); 
 
 //- - - - - - init data fields - - - - - - - - - - - 
 char yyyy[2][5];   //year   yyyy
@@ -78,6 +85,11 @@ float voltage[2];
 float sinr[2];
 float rssi[2];
 float pressure[2]; 
+float orp[2];
+
+float wave_height;
+float wave_period;
+int wave_direction;
 
 //- - - - - - other variables - - - - - - - - - -
 const byte SD_PIN = A5;             // selector for SD
@@ -85,23 +97,36 @@ const byte LED_PIN = A4;            // selecter for LED
 const int WQS = 10;                 // number of samples to take for each water quality sensor
 const float GRAVITY = 9.8;          //
 const int IMU_SAMPLE_SIZE = 4608;   //  
-const byte LOOP_DURATION = 30;       // 30 minutes 
+const byte LOOP_DURATION = 30;      // 30 minutes 
 File myFile;                        //
 size_t mainLoopTime;                // stores time for main loop
 int array_index;                    // 
+byte watchdogRestarted = 0;         // store whether or not a message should send if the watch dog restarted the MCU
 
 // - - - - - - - - - - - error state blink enum - - - - - - - - - - - - 
 enum states {SETUP_STATE, GPS_STATE, OTHER_DATA_STATE, IMU_STATE, SEND_STATE, WRITE_STATE};
 
 void setup()
 {
-  int error = 0;
-  delay(5000);
+  #if NDEBUG
+  delay(5000); // delays for 5 seconds
+  #endif
 
+  IWatchdog.begin(30000000); // set watchdog to 30 seconds
+  int error = 0;
+
+  if(IWatchdog.isReset(true))
+    watchdogRestarted = 1;
+  
   pinMode(LED_PIN, OUTPUT); //setup LED
   serialDebug.begin(115200); 
   notecard.begin();
   Wire.begin();
+  myMux.begin();
+
+  #if NDEBUG
+  notecard.setDebugOutputStream(serialDebug);
+  #endif
 
   configureSensors();
 
@@ -109,18 +134,14 @@ void setup()
   error += setUpSD(); 
   #endif
 
-  #if NDEBUG
-  notecard.setDebugOutputStream(serialDebug);
-  #endif
-
   J *req = notecard.newRequest("hub.set");
   if (req) {
     JAddStringToObject(req, "product", productUID);
-    JAddStringToObject(req, "mode", "continuous");
+    JAddStringToObject(req, "mode", "periodic");
     JAddBoolToObject(req, "sync", true);
     if (!notecard.sendRequest(req)) {
       notecard.logDebug("FATAL: Failed to configure Notecard!\n");
-      while(1);
+      error -= 1;
     }
   }
 
@@ -137,50 +158,75 @@ void setup()
  */
 void loop()
 { 
-  mainLoopTime = millis();
+  IWatchdog.reload(); // kick dog
+
+  mainLoopTime = millis(); //get loop start time 
   array_index = 0;
 
-  #if GPS_CONNECT
+  #if GPS_CONNECT //dog kicked in function 
   blink(connectToGPS(),GPS_STATE);
+  IWatchdog.reload();  
   #else
   noGPS();
   setTimeVars();
+  IWatchdog.reload();  
   #endif
 
-  #if OTHER_DATA
+  #if OTHER_DATA //dog kicked in function
   blink(otherData(),OTHER_DATA_STATE);
+  IWatchdog.reload();  
   #else
   noData();
+  IWatchdog.reload();  
   #endif
 
   array_index = 1;
 
-  #if SAMPLE_IMU
+  #if SAMPLE_IMU //dog kicked in function
   blink(sample_IMU(),IMU_STATE);
+  IWatchdog.reload(); // 
+  #else
+  noIMU();
+  IWatchdog.reload();  
   #endif
 
-  #if GPS_CONNECT
+  #if GPS_CONNECT //dog kicked in function
   blink(connectToGPS(),GPS_STATE);
+  IWatchdog.reload();  
   #else
   noGPS();
   setTimeVars();
+  IWatchdog.reload();  
   #endif
   
-  #if OTHER_DATA
+  #if OTHER_DATA //dog kicked in function
   blink(otherData(),OTHER_DATA_STATE);
+  IWatchdog.reload();  
   #endif
 
   #if SEND_DATA
   blink(sendData(),SEND_STATE);
+  IWatchdog.reload();  
   #endif
 
   #if WRITE_MAIN
   blink(writeToMainFile(),WRITE_STATE);
+  IWatchdog.reload();  
   #endif
   
   #if WAIT
-  while(millis() < mainLoopTime + LOOP_DURATION * 60000);
+  size_t x = millis();
+  while(millis() < mainLoopTime + LOOP_DURATION * 60000){  // wait for remaining time to fulfill 30 minute loop cycle
+    /*  every 20 seconds */
+    if(millis() > x + 20000){
+      IWatchdog.reload(); 
+      x = millis();
+      serialDebug.println("waiting");
+    }
+  }
   #endif
+
+  watchdogRestarted = 0;
 }
 
 void blink(int error, int state) 
@@ -192,9 +238,11 @@ void blink(int error, int state)
       delay(100);
       digitalWrite(LED_PIN, LOW);
       delay(100);
+      IWatchdog.reload();  
     }
   }
-  else{
+  else{ /* in event of error */
+    serialDebug.println("ERROR");
     digitalWrite(LED_PIN, HIGH);  
     delay(4000);
     digitalWrite(LED_PIN, LOW);
@@ -204,29 +252,97 @@ void blink(int error, int state)
       delay(500);
       digitalWrite(LED_PIN, LOW);
       delay(250);
+      IWatchdog.reload();  
     }
-    //log an error to SD here?
+    myFile = SD.open("ERROR_LOG.txt", FILE_WRITE);
+    if (myFile) {
+
+      serialDebug.println(state); //error code
+      serialDebug.println(array_index); // current position in loop
+
+      myFile.println(state); //error code
+      myFile.println(array_index); // current position in loop
+
+      for(int i = 0; i < 2; i++){
+        myFile.print(yyyy[i]);
+        myFile.print(",");
+        myFile.print(mM[i]);
+        myFile.print(",");
+        myFile.print(dd[i]);
+        myFile.print(",");
+        myFile.print(hh[i]);
+        myFile.print(",");
+        myFile.print(mm[i]);
+        myFile.print(",");
+        myFile.print(ss[i]);
+        myFile.print(",");
+        myFile.print(sats[i]);
+        myFile.print(",");
+        myFile.print(lat[i]);
+        myFile.print(",");
+        myFile.print(lon[i]);
+        myFile.print(",");
+        myFile.print(airTemp[i]);
+        myFile.print(",");
+        myFile.print(waterTemp[i]);
+        myFile.print(",");
+        myFile.print(conductivity[i]);
+        myFile.print(",");
+        myFile.print(dissolvedOxygen[i]);
+        myFile.print(",");
+        myFile.print(pH[i]);
+        myFile.print(",");
+        myFile.print(orp[i]);
+        myFile.print(",");
+        myFile.print(sinr[i]);
+        myFile.print(",");
+        myFile.print(rssi[i]);
+        myFile.print(",");
+        myFile.print(pressure[i]);
+        myFile.print(",");
+        myFile.print(voltage[i]);
+        myFile.print(",");
+        myFile.println(watchdogRestarted);
+      }
+      myFile.close();
+    }
+    delay(35000); //let watchdog reset microcontroller 
   }
+  IWatchdog.reload();
 }
 
 #if OTHER_DATA
 int otherData()
 {    
-    getTemp(TSYS01_AIR_PORT, airTempSensor, airTemp);
-    getTemp(TSYS01_WATER_PORT, waterTempSensor, waterTemp);
+  serialDebug.println("--- Starting Subsequence");
+
+  IWatchdog.reload(); // 
+
+  getTemp(TSYS01_AIR_PORT, airTempSensor, airTemp);
+  getWaterQualitySesnorReadings(EC_PORT, EC, conductivity, WQS);
+
+  IWatchdog.reload(); // 
+
+  getWaterQualitySesnorReadings(DO_PORT, DO, dissolvedOxygen, WQS);
+  getWaterQualitySesnorReadings(PH_PORT, PH, pH, WQS);
   
-    getWaterQualitySesnorReadings(EC_PORT, EC, conductivity, WQS);
-    getWaterQualitySesnorReadings(DO_PORT, DO, dissolvedOxygen, WQS);
-    getWaterQualitySesnorReadings(PH_PORT, PH, pH, WQS);
+  IWatchdog.reload(); // 
 
-    get_voltage();
+  getWaterQualitySesnorReadings(ORP_PORT, ORP, orp, WQS);
+  getWaterQualitySesnorReadings(RTD_PORT, RTD, waterTemp, WQS);
 
-    get_signal_metrics();   
+  IWatchdog.reload(); // 
 
-    enableMuxPort(PRESSURE_PORT);                                                       
-    pressure[array_index] = pressureSensor.getPressure(ADC_4096);  // Read pressure from the sensor in mbar.
-    disableMuxPort(PRESSURE_PORT);
-    return 0;
+  get_voltage();
+  get_signal_metrics();   
+
+  myMux.setPort(PRESSURE_PORT);                                                       
+  pressure[array_index] = pressureSensor.getPressure(ADC_4096);  // Read pressure from the sensor in mbar.
+
+  IWatchdog.reload(); // 
+
+  serialDebug.println("--- Subsequence Complete");
+  return 0;
 }
 #else
 void noData()
@@ -242,14 +358,22 @@ void noData()
     rssi[i] = NAN;
     pressure[i] = NAN; 
   }
+  IWatchdog.reload();
 }
 #endif
 
 #if GPS_CONNECT
 int connectToGPS()
 {  
+  serialDebug.println("--- Starting attempt to obtain GPS connection");
+
   // Save the time from the last location reading.
   J *rsp = notecard.requestAndResponse(notecard.newRequest("card.location"));
+  if (rsp == nullptr) {
+    serialDebug.println("Error: No response from Notecard.");
+    notecard.deleteResponse(rsp);
+    return -1; // Return an error code or handle the error as needed
+  }
   size_t previous_gps_time_s = JGetInt(rsp, "time");
   notecard.deleteResponse(rsp);
   
@@ -264,6 +388,9 @@ int connectToGPS()
 
   // Block while resolving GPS/GNSS location
   for (const size_t start_ms = ::millis();;) {
+
+    IWatchdog.reload(); // 
+
     // Check for a timeout, and if enough time has passed, break out of the loop
     // to avoid looping forever    
     if (::millis() >= (start_ms + (timeout_s * 1000))) {
@@ -284,7 +411,7 @@ int connectToGPS()
       J *req = notecard.newRequest("card.location.mode");
       JAddStringToObject(req, "mode", "periodic");
       notecard.sendRequest(req);
-      serialDebug.println("GPS connection successful :)\n");
+      serialDebug.println("--- GPS connection successful :)\n");
       return 0; //gps connection success
     }
   
@@ -299,13 +426,23 @@ int connectToGPS()
     // Wait 2 seconds before tryring again 
     delay(2000);
   }
-  return -1; //gps connection failed
+  serialDebug.println("failed to obtain GPS connection");
+  noGPS();
+  return 0; //gps connection failed
 }
 #endif
 
 #if SEND_DATA
 int sendData()
 {
+  serialDebug.println("--- Sending Data");
+
+  bool dog_reset;
+  if (watchdogRestarted == 1)
+    dog_reset = true;
+  else
+    dog_reset = false;
+
   //send to cloud
   J *req = notecard.newRequest("note.add");  //create note request 
   if (req != NULL)
@@ -333,31 +470,35 @@ int sendData()
       JAddNumberToObject(body, "dissolved_oxygen", dissolvedOxygen[i]);
       JAddNumberToObject(body, "conductivity", conductivity[i]);
       JAddNumberToObject(body, "pH", pH[i]);
-      JAddNumberToObject(body, "voltage", voltage[i]);
+      JAddNumberToObject(body, "orp", orp[i]);
       JAddNumberToObject(body, "rssi", rssi[i]);
       JAddNumberToObject(body, "sinr", sinr[i]);
       JAddNumberToObject(body, "pressure", pressure[i]);
+      JAddNumberToObject(body, "voltage", voltage[i]);
+      JAddBoolToObject(body, "watchdog_reset", dog_reset);
     }
-    if (!notecard.sendRequest(req)) 
+    if (!notecard.sendRequest(req)){
+      serialDebug.println("Failed to send data");
       return -1;
+    }
   }
+  serialDebug.println("--- Data Sent");
   return 0;
 }
 #endif
 
 #if OTHER_DATA
 
-void getTemp(int port, TSYS01 tempSensor, float* arr)
+void getTemp(byte port, TSYS01 tempSensor, float* arr)
 {
-
-  enableMuxPort(port);
+  serialDebug.println("--- Getting Temperature");
+  myMux.setPort(port);
   
   float sumOfTemps = 0;
   int count = 0;
-  int NUM_READINGS = 20;
   size_t start_ms = millis();
 
-  while(count < NUM_READINGS){
+  while(count < WQS){
     if(millis() >= start_ms + count * 100){ //read every 100 milliseconds
       tempSensor.read();
       delay(80);
@@ -366,17 +507,17 @@ void getTemp(int port, TSYS01 tempSensor, float* arr)
     } 
   }
   
-  arr[array_index] = sumOfTemps/NUM_READINGS;
-
-  disableMuxPort(port);
+  arr[array_index] = sumOfTemps/WQS;
+  serialDebug.println("--- Temperature Obatained");
 }
 #endif
 
 
 #if OTHER_DATA
-int getWaterQualitySesnorReadings(int port, Ezo_board sensor, float* arr, int samples)
+int getWaterQualitySesnorReadings(byte port, Ezo_board sensor, float* arr, int samples)
 {  
-  enableMuxPort(port);
+  serialDebug.println("--- Reading Water Quality Sensor");
+  myMux.setPort(port);
   
   float sumOfReadings = 0;
   int NUM_READINGS = samples;
@@ -390,14 +531,15 @@ int getWaterQualitySesnorReadings(int port, Ezo_board sensor, float* arr, int sa
   }
 
   arr[array_index] = sumOfReadings/NUM_READINGS;
-
-  disableMuxPort(port);
+  serialDebug.println("--- Water Quality Sensor Read Complete!");
 }
 #endif
 
 #if OTHER_DATA
 void get_voltage()
 {
+  serialDebug.println("--- Reading Voltage");
+
   J *req = NoteNewRequest("card.voltage");
   JAddStringToObject(req, "mode", "?");
   
@@ -422,7 +564,6 @@ int get_signal_metrics()
   rssi[array_index] = JGetInt(info, "rssi");
   notecard.deleteResponse(rsp);
   return 0;  
-
 }
 #endif
 
@@ -430,7 +571,7 @@ int get_signal_metrics()
 #if GPS_CONNECT
 int setLocationVars(J *rsp)
 {  
-  serialDebug.println("start location func");
+  serialDebug.println("--- Starting location func");
   if (rsp == NULL) 
     return -1;
 
@@ -444,14 +585,12 @@ int setLocationVars(J *rsp)
 }
 #endif
 
-
 void noGPS()
 {
   lat[array_index] = NAN;
   lon[array_index] = NAN;
   sats[array_index] = NAN;
 }
-
 
 int setTimeVars()
 {
@@ -525,6 +664,8 @@ float getAverage(float arr[], int n) {
 #if SAMPLE_IMU
 int sample_IMU()
 {
+  serialDebug.println("--- Starting IMU Sampling\n");
+
   setTimeVars();
 
   char filename[13];
@@ -533,9 +674,8 @@ int sample_IMU()
   strcat(filename, mm[array_index]);
   strcat(filename, "I.txt");
    
-  enableMuxPort(IMU_PORT);
+  myMux.setPort(IMU_PORT);
 
-  
   size_t start_ms = ::millis();
 
   myFile = SD.open(filename, FILE_WRITE);   
@@ -543,6 +683,8 @@ int sample_IMU()
   if(myFile){
     
     serialDebug.println("file was made");
+
+    myFile.println("yyyy,mM,dd,hh,mm,ss,sats,lat,lon");
 
     myFile.print(yyyy[array_index]);
     myFile.print(",");
@@ -566,9 +708,15 @@ int sample_IMU()
 
     int count = 0;
 
-    float array[9][IMU_SAMPLE_SIZE];
+    float **array;
+    array = new float *[9];
+    for(int i = 0; i<9; i++)
+    array[i] = new float[IMU_SAMPLE_SIZE];
 
     while(count < IMU_SAMPLE_SIZE){
+      
+      IWatchdog.reload(); // kick the dog
+                               //250
       if(millis() >= start_ms + 250 * count && myICM.dataReady()){
         myICM.getAGMT();  
 
@@ -605,100 +753,74 @@ int sample_IMU()
     }
 
     myFile.close();
-    serialDebug.println("IMU data collection complete");
+    serialDebug.println("--- IMU sampling complete");
+
+    WaveProcessor wave_processor(array, IMU_SAMPLE_SIZE);
+    wave_height = wave_processor.getHeight();
+    wave_period = wave_processor.getPeriod();
+    wave_direction = wave_processor.getDirection();
     
+    for(int i = 0; i<9; i++)
+      delete[] array[i];
+    delete[] array;
+
+
   } else {
-    serialDebug.println("ERROR: file was not made");
+    noIMU();
     return -1;
   }
-  disableMuxPort(IMU_PORT);
   return 0;
 }
 #endif
 
+void noIMU(){
+  wave_height = NAN;
+  wave_period = NAN;
+  wave_direction = NAN;
+}
 
 int configureSensors()
 {
   #if SAMPLE_IMU
-  enableMuxPort(IMU_PORT);
+  myMux.setPort(IMU_PORT);
   while(true){
     myICM.begin(Wire, 1);
     if (myICM.status == ICM_20948_Stat_Ok)
       break;
     delay(500);
   }
-  disableMuxPort(IMU_PORT);
   #endif
 
   #if OTHER_DATA
-  enableMuxPort(TSYS01_AIR_PORT);
+  myMux.setPort(TSYS01_AIR_PORT);
   airTempSensor.init();
-  disableMuxPort(TSYS01_AIR_PORT);
 
-  enableMuxPort(TSYS01_WATER_PORT);
-  waterTempSensor.init();
-  disableMuxPort(TSYS01_WATER_PORT);
-
-  enableMuxPort(PRESSURE_PORT);
+  myMux.setPort(PRESSURE_PORT);
   pressureSensor.begin();
-  disableMuxPort(PRESSURE_PORT);
   #endif
 
   return 0;
 }
-
-int enableMuxPort(byte portNumber)
-{
-  if(portNumber > 7) portNumber = 7;
-
-  //Read the current mux settings
-  Wire.requestFrom(MUX_ADDR, 1);
-  if(!Wire.available()) 
-    return -1; //Error
-  byte settings = Wire.read();
-
-  //Set the wanted bit to enable the port
-  settings |= (1 << portNumber);
- 
-  Wire.beginTransmission(MUX_ADDR);
-  Wire.write(settings);
-  Wire.endTransmission();
-
-  return 0;
-}
-
-int disableMuxPort(byte portNumber)
-{
-  if(portNumber > 7) portNumber = 7;
-
-  //Read the current mux settings
-  Wire.requestFrom(MUX_ADDR, 1);
-  if(!Wire.available())
-   return -1; //Error
-  byte settings = Wire.read();
-
-  //Clear the wanted bit to disable the port
-  settings &= ~(1 << portNumber);
-
-  Wire.beginTransmission(MUX_ADDR);
-  Wire.write(settings);
-  Wire.endTransmission();
-
-  return 0;
-}
-
 
 #if WRITE_MAIN || SAMPLE_IMU
 int setUpSD()
 {
-  Serial.print("Initializing SD card...");
+  Serial.print("Initializing SD card...  ");
   if (SD.begin(SD_PIN)) {
 
-    Serial.println("initialization done.");
-    myFile = SD.open("test.txt", FILE_WRITE);
+    Serial.println("initialization done");
 
+    myFile = SD.open("start.txt", FILE_WRITE);
     if(myFile){
-      myFile.println("Meow");
+      if (IWatchdog.isReset(true)){
+        myFile.println("restarted by watchdog");
+        Serial.println("restarted by watchdog");
+
+      }
+      else{
+        myFile.println("system start");
+        Serial.println("system start");
+      }
       myFile.close();
       return 0;
     }
@@ -712,6 +834,9 @@ int setUpSD()
 #if WRITE_MAIN
 int writeToMainFile()
 {
+
+  serialDebug.println("--- Writing To Main File");
+
   char filename[13];
   strcpy(filename, "BUOY");
   strcat(filename, yyyy[array_index]);
@@ -749,17 +874,23 @@ int writeToMainFile()
       myFile.print(",");
       myFile.print(pH[i]);
       myFile.print(",");
+      myFile.print(orp[i]);
+      myFile.print(",");
       myFile.print(sinr[i]);
       myFile.print(",");
       myFile.print(rssi[i]);
       myFile.print(",");
       myFile.print(pressure[i]);
       myFile.print(",");
-      myFile.println(voltage[i]);
+      myFile.print(voltage[i]);
+      myFile.print(",");
+      myFile.println(watchdogRestarted);
     }
     myFile.close();
+    serialDebug.println("--- Main File Write Complete");
     return 0;
   }
+
 
   return -1;
 }
