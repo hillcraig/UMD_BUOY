@@ -43,7 +43,7 @@ const byte DO_ADDR = 97;
 const byte RTD_ADDR = 102;
 
 // - - - - - set ports for multiplexer - - - - - - - 
-const byte IMU_PORT = 1;
+const byte IMU_PORT = 0;
 const byte TSYS01_AIR_PORT = 1;
 const byte EC_PORT = 5;
 const byte PH_PORT = 3;
