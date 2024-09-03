@@ -10,7 +10,6 @@
 #include "Ezo_i2c.h" 
 #include "SparkFun_MS5803_I2C.h"
 #include "SparkFun_I2C_Mux_Arduino_Library.h"
-#include "WaveProcessor.h"
 #include <time.h> 
 #include <Wire.h>
 #include <SPI.h>
@@ -57,7 +56,7 @@ Notecard notecard;        //notecard object
 QWIICMUX myMux;           //multiplexer
 TSYS01 airTempSensor;     //sesnor used to collect air temperature
 ICM_20948_I2C myICM;      //sensor for motion 
-MS5803 pressureSensor(ADDRESS_HIGH);  //pressure
+//MS5803 pressureSensor(ADDRESS_HIGH);  //pressure
 Ezo_board EC = Ezo_board(EC_ADDR, "EC");
 Ezo_board DO = Ezo_board(DO_ADDR, "DO");  
 Ezo_board PH = Ezo_board(PH_ADDR, "PH"); 
@@ -87,9 +86,9 @@ float rssi[2];
 float pressure[2]; 
 float orp[2];
 
-float wave_height;
-float wave_period;
-int wave_direction;
+float wave_height = NAN;
+float wave_period = NAN;
+int wave_direction = NAN;
 
 //- - - - - - other variables - - - - - - - - - -
 const byte SD_PIN = A5;             // selector for SD
@@ -119,10 +118,10 @@ void setup()
     watchdogRestarted = 1;
   
   pinMode(LED_PIN, OUTPUT); //setup LED
-  serialDebug.begin(115200); 
-  notecard.begin();
+  serialDebug.begin(9600); 
   Wire.begin();
   myMux.begin();
+  notecard.begin();
 
   #if NDEBUG
   notecard.setDebugOutputStream(serialDebug);
@@ -298,8 +297,8 @@ void blink(int error, int state)
         myFile.print(",");
         myFile.print(rssi[i]);
         myFile.print(",");
-        myFile.print(pressure[i]);
-        myFile.print(",");
+        //myFile.print(pressure[i]);
+        //myFile.print(",");
         myFile.print(voltage[i]);
         myFile.print(",");
         myFile.println(watchdogRestarted);
@@ -336,8 +335,8 @@ int otherData()
   get_voltage();
   get_signal_metrics();   
 
-  myMux.setPort(PRESSURE_PORT);                                                       
-  pressure[array_index] = pressureSensor.getPressure(ADC_4096);  // Read pressure from the sensor in mbar.
+  //myMux.setPort(PRESSURE_PORT);                                                       
+  //pressure[array_index] = pressureSensor.getPressure(ADC_4096);  // Read pressure from the sensor in mbar.
 
   IWatchdog.reload(); // 
 
@@ -356,7 +355,7 @@ void noData()
     voltage[i] = NAN;
     sinr[i] = NAN;
     rssi[i] = NAN;
-    pressure[i] = NAN; 
+    //pressure[i] = NAN; 
   }
   IWatchdog.reload();
 }
@@ -473,7 +472,7 @@ int sendData()
       JAddNumberToObject(body, "orp", orp[i]);
       JAddNumberToObject(body, "rssi", rssi[i]);
       JAddNumberToObject(body, "sinr", sinr[i]);
-      JAddNumberToObject(body, "pressure", pressure[i]);
+      //JAddNumberToObject(body, "pressure", pressure[i]);
       JAddNumberToObject(body, "voltage", voltage[i]);
       JAddBoolToObject(body, "watchdog_reset", dog_reset);
     }
@@ -652,15 +651,6 @@ int find_number_after_substring(char* str, char* substring) {
   return atoi(p);
 }
 
-float getAverage(float arr[], int n) {
-    float sum = 0;
-    for (int i = 0; i < n; i++) {
-        sum += arr[i];
-    }
-    return sum / n;
-}
-
-
 #if SAMPLE_IMU
 int sample_IMU()
 {
@@ -754,11 +744,6 @@ int sample_IMU()
 
     myFile.close();
     serialDebug.println("--- IMU sampling complete");
-
-    WaveProcessor wave_processor(array, IMU_SAMPLE_SIZE);
-    wave_height = wave_processor.getHeight();
-    wave_period = wave_processor.getPeriod();
-    wave_direction = wave_processor.getDirection();
     
     for(int i = 0; i<9; i++)
       delete[] array[i];
@@ -795,8 +780,8 @@ int configureSensors()
   myMux.setPort(TSYS01_AIR_PORT);
   airTempSensor.init();
 
-  myMux.setPort(PRESSURE_PORT);
-  pressureSensor.begin();
+  //myMux.setPort(PRESSURE_PORT);
+  //pressureSensor.begin();
   #endif
 
   return 0;
@@ -880,8 +865,8 @@ int writeToMainFile()
       myFile.print(",");
       myFile.print(rssi[i]);
       myFile.print(",");
-      myFile.print(pressure[i]);
-      myFile.print(",");
+      //myFile.print(pressure[i]);
+      //myFile.print(",");
       myFile.print(voltage[i]);
       myFile.print(",");
       myFile.println(watchdogRestarted);
@@ -890,7 +875,6 @@ int writeToMainFile()
     serialDebug.println("--- Main File Write Complete");
     return 0;
   }
-
 
   return -1;
 }
