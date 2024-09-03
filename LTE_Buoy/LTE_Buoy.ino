@@ -95,7 +95,7 @@ const byte SD_PIN = A5;             // selector for SD
 const byte LED_PIN = A4;            // selecter for LED    
 const int WQS = 10;                 // number of samples to take for each water quality sensor
 const float GRAVITY = 9.8;          //
-const int IMU_SAMPLE_SIZE = 4608;   //  
+const int IMU_SAMPLE_SIZE = 18432;   //  
 const byte LOOP_DURATION = 30;      // 30 minutes 
 File myFile;                        //
 size_t mainLoopTime;                // stores time for main loop
@@ -707,7 +707,7 @@ int sample_IMU()
       
       IWatchdog.reload(); // kick the dog
                                //250
-      if(millis() >= start_ms + 250 * count && myICM.dataReady()){
+      if(millis() >= start_ms + 62.5 * count && myICM.dataReady()){
         myICM.getAGMT();  
 
         array[0][count] = myICM.accX()/1000 * GRAVITY;
