@@ -10,7 +10,7 @@ Welcome to the University of Minnesota Duluth (UMD) open‑source environmenta
 .
 ├── LICENSE
 ├── LTE_Buoy/                 # Cellular buoy (Blues Swan R5 + Notecard LTE)
-│   └── LTE_Buoy.ino
+│   └── main.cpp
 |   └── platformio.ini
 ├── SAT_Buoy/                 # Iridium buoy 
 │   └── Iridium_Buoy_Final/Iridium_Buoy_Final.ino
@@ -62,11 +62,11 @@ Welcome to the University of Minnesota Duluth (UMD) open‑source environmenta
 
 ## Deployment Checklist
 
+* ✅ **Reset firmware debug mode** Toggle back firmware preporcessing to deploy mode.
 * ✅ **Firmware flashed** (latest `main` build).
 * ✅ **Battery/Solar** connected & charging.
 * ✅ **SD card prepped** (see below).
 * ✅ **Sensors** reporting nominal values.
-* ✅ **Water‑tight enclosure** sealed.
 
 ### SD‑Card Preparation & File Naming
 

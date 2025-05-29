@@ -22,16 +22,16 @@
 #include <math.h> 
 
 #define serialDebug Serial
-#define productUID "com.gmail.liamgaeuman:environmental_monitoring_buoy" 
+#define productUID //add your product UID here
 #ifndef ARDUINO_SWAN_R5
 #error "This program was designed to run on the Blues Wireless Swan"
 #endif
 
 //toggle steps: 1 on, 0 off
 //only use 0 for testing purposes except for NDBUG which should be 0 for deployment 
-#define DEBUG_PRINT 1                  
+#define DEBUG_PRINT 0                  
 #define SAMPLE_IMU 1                           
-#define GPS_CONNECT 0 
+#define GPS_CONNECT 1 
 #define OTHER_DATA 1          
 #define SEND_DATA 1               
 #define WRITE_MAIN 1                           
